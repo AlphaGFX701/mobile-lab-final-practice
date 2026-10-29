@@ -1,5 +1,12 @@
 # Mobile Lab verification — 2026-10-29
 
+## Analytical exam mode update
+- `npm test`: 10 tests passed. The new tests exercise 1,000 analytical draws: exactly 50 MC, six code blanks, six commands, unique IDs, 74 possible points, source links, and guaranteed setup/Android/build command coverage.
+- `npm run build`: passed with the analytical bank in a separate application bundle. The existing lazy 3D chunk warning remains.
+- Browser on an isolated local origin: analytical mode, correct MC answer, pending and correct code blank, official Expo source link for project creation, saved-session reload, 74/74 result, question and answer print markup, repeat mode, original exam mode, theme switch, and 320/390/768/1440px layouts passed without page errors. The review dialog footer stayed visible at the three smaller widths.
+- The new mode labels itself as simulated practice. Project setup and start commands are identified as supplementary and linked to official Expo documentation. The original course bank remains unchanged.
+- Generated screenshots are in `verification/analysis-*.png`. The script is `verification/analysis-check.mjs` (the verification directory is ignored by Git).
+
 ## Passed
 - Production build: `npm run build` (Vite 8.3.5).
 - `npm test`: 6 tests, including 1,000 complete exam draws. Every draw has 50 MC + 12 command questions, unique IDs, four distinct MC options and 74 possible points.
@@ -24,12 +31,4 @@
 - Build warning: lazy 3D chunk is 635KB uncompressed (~160KB gzip). It loads on home only.
 
 ## Vercel
-Target: God_like (`team_UcUqRnHkza20QKaTBJdL5EUD`), project `mobile-lab-final-practice`.
-Connector project creation still returns 403. Following the user-provided team dashboard URL, the signed-in Chrome session successfully created a new empty project and renamed it mobile-lab-final-practice. Project ID: prj_fcGSNQ9uUt8VPRekqrUGvZ5ysVvk. URL: https://vercel.com/god-like1/mobile-lab-final-practice. The connector cannot read this new project (404), so browser upload is required. ZIP upload is currently blocked by the ChatGPT Chrome extension lacking Allow access to file URLs. Explicit user approval has been requested before changing that permission. No production deployment exists yet. No unrelated project was modified.
-
-Ready artifacts: dist/, MobileLab-deploy.zip, vercel.json (Vite, npm run build, dist output).
-
-Tests used isolated origins 5173 and 4173. The user's session at 8765 was not overwritten by QA.
-
-
-Git deployment: source published to private repository AlphaGFX701/mobile-lab-final-practice. Existing Vercel project connected to that repository through the dashboard; production branch main. Browser file upload is no longer needed.
+The `mobile-lab-final-practice` project in the God_like team is connected to the private repository `AlphaGFX701/mobile-lab-final-practice`; production follows the `main` branch. The public URL is https://mobile-lab-final-practice.vercel.app/. No ZIP upload or browser file permission is needed. The production site must be checked after each push. Local QA uses an isolated origin and does not overwrite the user's session at port 8765.

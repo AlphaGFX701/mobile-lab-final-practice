@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { makeSession, scoreSession, gradeQuestion } from './exam-core.js';
 import { buildPrintMarkup } from './print-document.js';
+import { ANALYSIS_QUESTIONS, ANALYSIS_SHORT, ANALYSIS_SOURCES } from './analysis-bank.js';
 const data = vm.runInNewContext(`${fs.readFileSync(new URL('./bank.js', import.meta.url), 'utf8')};({QUESTIONS,COMMANDS,SOURCES})`);
 test('1000 exam draws have exactly 50 MC + 12 commands, unique IDs, valid options and 74 points', () => {
   for (let i = 0; i < 1000; i++) {
@@ -51,4 +52,41 @@ test('print question paper has 62 questions, 12 command blanks and no answer key
   assert.ok(paper.includes('74 points'));
   assert.equal((key.match(/class="print-reference"/g) || []).length, 62);
   assert.equal((key.match(/class="print-answer"/g) || []).length, 62);
+});
+test('analytical draws retain 50+12, six code blanks, six commands, source links and 74 points', () => {
+  const sources = { ...data.SOURCES, ...ANALYSIS_SOURCES };
+  const counts = { BLE: 18, Sensors: 14, Android: 7, iOS: 7, Environment: 4 };
+  for (let i = 0; i < 1000; i++) {
+    const s = makeSession(ANALYSIS_QUESTIONS, ANALYSIS_SHORT, 'analysis');
+    assert.equal(s.questions.length, 62);
+    assert.equal(new Set(s.questions.map(q => q.id)).size, 62);
+    assert.equal(s.questions.filter(q => q.options).length, 50);
+    assert.equal(s.questions.filter(q => q.kind === 'code').length, 6);
+    assert.equal(s.questions.filter(q => q.kind === 'command').length, 6);
+    for (const [topic, count] of Object.entries(counts)) {
+      const actual = s.questions.slice(0, 50).filter(q => topic === 'BLE' ? ['BLE', 'BLE code'].includes(q.topic) : q.topic === topic).length;
+      assert.equal(actual, count);
+    }
+    for (const category of ['create', 'android', 'build']) assert.ok(s.questions.some(q => q.category === category));
+    for (const q of s.questions) {
+      assert.ok(sources[q.source]?.url && q.ref && q.explanation);
+      if (q.options) assert.equal(new Set(q.options).size, 4);
+      if (q.kind === 'code') assert.equal((q.snippet.match(/____/g) || []).length, 1);
+      s.answers[q.id] = q.correct;
+    }
+    assert.deepEqual(scoreSession(s), { mc: 50, short: 24, mcMax: 50, shortMax: 24, pending: 0, total: 74, max: 74 });
+  }
+  const s = makeSession(ANALYSIS_QUESTIONS, ANALYSIS_SHORT, 'analysis');
+  const paper = buildPrintMarkup(s, sources), key = buildPrintMarkup(s, sources, true);
+  assert.equal((paper.match(/class="print-question"/g) || []).length, 62);
+  assert.equal((paper.match(/class="print-code"/g) || []).length, 6);
+  assert.equal((key.match(/class="print-reference"/g) || []).length, 62);
+  assert.match(paper, /Code and commands/);
+});
+test('code blanks require the exact method token, with other answers pending review', () => {
+  const q = ANALYSIS_SHORT.find(item => item.kind === 'code');
+  const s = { answers: { [q.id]: ` ${q.correct} ` }, reviews: {} };
+  assert.equal(gradeQuestion(q, s).points, 2);
+  s.answers[q.id] = q.correct.toLowerCase();
+  assert.equal(gradeQuestion(q, s).pending, true);
 });
