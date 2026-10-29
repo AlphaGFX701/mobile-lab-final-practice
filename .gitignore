@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.vercel/
+.env
+.env.*
+*.zip
+verification/
+premium-audit.json
+print-check.html
+scene-check.html

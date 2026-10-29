@@ -1,0 +1,6 @@
+import { scoreSession } from './exam-core.js';
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export function buildPrintMarkup(session, sources, key = false) {
+  const s = scoreSession(session);
+  return `<div class="print-heading"><h1>Mobile Lab / ${key ? 'Answer Key' : 'Practice Exam'}</h1><p>${s.mcMax} multiple choice × 1 point + ${s.shortMax / 2} commands × 2 points = ${s.max} points</p><p>ชื่อ ___________________________________ วันที่ __________________</p></div>${session.questions.map((q, i) => `${i === 0 || (i > 0 && Boolean(q.options) !== Boolean(session.questions[i - 1].options)) ? `<h2 class="print-part">${q.options ? 'Part 1 · Multiple choice' : 'Part 2 · Commands'}</h2>` : ''}<div class="print-question"><h3 lang="en">${i + 1}. ${esc(q.question)} (${q.options ? 1 : 2} ${q.options ? 'point' : 'points'})</h3>${q.options ? q.options.map((o, j) => `<p lang="en">${String.fromCharCode(65 + j)}. ${esc(o)}</p>`).join('') : '<div class="answer-space">Answer:</div>'}${key ? `<div class="print-answer"><b>Answer: <code>${esc(q.correct)}</code></b><p>${esc(q.explanation)}</p><p class="print-reference">${esc(sources[q.source].name)} · ${esc(q.ref)}<br>${esc(sources[q.source].url)}</p></div>` : ''}</div>`).join('')}`;
+}

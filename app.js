@@ -1,0 +1,162 @@
+import { buildPrintMarkup } from './print-document.js';
+import { makeSession, gradeQuestion, scoreSession } from './exam-core.js';
+
+const app = document.querySelector('#app');
+const KEY = 'mobilelab-v1';
+let session = null, sceneCleanup = null, viewVersion = 0;
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = selector => document.querySelector(selector);
+const topicsData = [
+  ['BLE', 'Bluetooth & BLE', 'การเชื่อมต่อไร้สาย, GATT, services และ characteristics'],
+  ['BLE code', 'BLE in practice', 'อ่านโค้ดแอป BLE และขั้นตอนเชื่อมต่ออุปกรณ์'],
+  ['Sensors', 'Motion & sensors', 'Accelerometer, gyroscope และ Expo Sensors'],
+  ['Android', 'Build for Android', 'พัฒนา ทดสอบ และ build แอปบน Android'],
+  ['iOS', 'Build for iOS', 'Simulator, อุปกรณ์จริง และขั้นตอน build บน iOS'],
+  ['Environment', 'Development environment', 'เครื่องมือและสภาพแวดล้อมในการพัฒนาแอป'],
+  ['Commands', 'Command practice', 'ฝึกเขียนคำสั่งที่ใช้ในการพัฒนาแอป']
+];
+function load() {
+  try { const value = JSON.parse(localStorage.getItem(KEY)); return value?.questions?.length && value.answers && Number.isInteger(value.index) && value.index >= 0 && value.index < value.questions.length ? value : null; }
+  catch { return null; }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(session)); const status = $('#save-status'); if (status) status.textContent = 'บันทึกในเบราว์เซอร์นี้แล้ว'; return true; }
+  catch { const status = $('#save-status'); if (status) { status.textContent = 'บันทึกไม่ได้ กรุณาอย่าปิดหน้านี้จนกว่าจะทบทวนเสร็จ'; status.classList.add('save-warning'); } return false; }
+}
+function page(html, name = '') {
+  sceneCleanup?.(); sceneCleanup = null; viewVersion++;
+  app.innerHTML = html;
+  document.querySelectorAll('nav [data-view]').forEach(b => b.setAttribute('aria-current', b.dataset.view === name ? 'page' : 'false'));
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+function confirmAction(title, copy, label, action) {
+  const dialog = $('#confirm-dialog');
+  $('#dialog-title').textContent = title; $('#dialog-copy').textContent = copy;
+  $('#dialog-ok').textContent = label;
+  $('#dialog-cancel').onclick = () => dialog.close();
+  $('#dialog-ok').onclick = () => { dialog.close(); action(); };
+  dialog.showModal();
+}
+function source(q) {
+  const s = SOURCES[q.source];
+  return `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)} · ${['ble', 'code', 'sensor'].includes(q.source) ? 'slide ' : ''}${esc(q.ref)} ↗</a>`;
+}
+function topicRows() {
+  return topicsData.map(([key, name, description], index) => `<div class="topic-row"><span class="topic-number">${String(index + 1).padStart(2, '0')}</span><div><h3>${name}</h3><p>${description}</p></div><span class="topic-count">${key === 'Commands' ? COMMANDS.length : QUESTIONS.filter(q => q.topic === key).length} QUESTIONS</span><button class="btn small" data-topic="${esc(key)}" aria-label="เริ่มฝึก ${name}">เริ่มฝึก ↗</button></div>`).join('');
+}
+function bindTopics() { document.querySelectorAll('[data-topic]').forEach(b => b.onclick = () => start('practice', b.dataset.topic)); }
+function home() {
+  const saved = load();
+  page(`<section class="hero"><div class="hero-copy"><div class="eyebrow">MOBILE APPLICATION DEVELOPMENT</div><h1>ฝึกก่อนสอบ<span>ปลายภาค</span></h1><p class="lead">ตั้งแต่เซนเซอร์ในโทรศัพท์ ไปจนถึงคำสั่งพัฒนาแอป<br>ฝึกจากเนื้อหาในห้องเรียน แล้วทบทวนจุดที่ยังไม่แม่น</p><div class="actions"><button class="btn primary" id="start">เริ่มสอบ 62 ข้อ ↗</button><button class="btn" id="practice">ฝึกแยกหัวข้อ →</button></div>${saved ? `<div class="actions"><button class="btn small" id="resume">${saved.submitted ? 'ดูผลครั้งล่าสุด' : `ทำต่อ · ข้อ ${saved.index + 1}/${saved.questions.length}`} ↗</button></div>` : ''}<p class="micro">ENGLISH QUESTIONS / คำอธิบายภาษาไทย</p></div><div class="visual"><div class="orbit" aria-hidden="true"></div><div class="orbit second" aria-hidden="true"></div><div class="model-stage" id="model-stage" role="img" aria-label="โมเดลโทรศัพท์ 3D สีกราไฟต์"><div class="model-fallback"><div class="fallback-phone"><span>MOBILE LAB</span><strong>m/</strong><span>SENSOR STUDIO</span></div></div></div><span class="sensor-tag tag-a">BLUETOOTH</span><span class="sensor-tag tag-b">SENSORS</span><span class="sensor-tag tag-c">&gt; COMMANDS</span><p class="model-status" id="model-status">กำลังเตรียมโมเดล 3D</p><div class="model-controls" aria-label="ควบคุมโมเดล"><button id="rotate-left" aria-label="หมุนซ้าย" disabled>↶</button><button id="rotate-right" aria-label="หมุนขวา" disabled>↷</button><button id="reset-model" disabled>รีเซ็ต</button><button id="motion-model" disabled>หยุดหมุน</button><button id="touch-model" hidden>เปิดการลาก</button></div></div></section><section class="exam-strip" aria-label="รูปแบบข้อสอบ"><div><strong>50</strong><span><b>Multiple choice</b><br>ข้อละ 1 คะแนน</span></div><div><strong>12</strong><span><b>Short answer</b><br>คำสั่ง · ข้อละ 2 คะแนน</span></div><div><strong>74</strong><span>คะแนนเต็ม<br>รวม 62 ข้อ</span></div></section><section class="section" id="topics"><div class="section-head"><div><div class="eyebrow">THE SYLLABUS / 07 TOPICS</div><h2>เริ่มจากบทที่อยากทบทวน</h2></div><p>สุ่มครั้งละไม่เกิน 10 ข้อ · เปิดเฉลยได้ทันที</p></div>${topicRows()}</section>`, 'home');
+  $('#start').onclick = () => start('exam');
+  $('#practice').onclick = topics;
+  if (saved) $('#resume').onclick = () => { session = load(); if (session) session.submitted ? results() : renderExam(); };
+  bindTopics();
+  const version = viewVersion, stage = $('#model-stage');
+  import('./scene.js').then(module => { if (version === viewVersion && stage.isConnected) sceneCleanup = module.mountScene(stage); }).catch(() => { if (stage.isConnected) $('#model-status').textContent = 'ภาพสำรอง · ไม่สามารถโหลด 3D ได้'; });
+}
+function topics() {
+  page(`<section class="workspace"><div class="eyebrow">TOPIC PRACTICE</div><h1 class="page-title">เลือกบทที่อยากฝึก</h1><p class="lead">เริ่มทีละหัวข้อ แล้วค่อยรวมเป็นชุดสอบเต็ม 62 ข้อ<br>แต่ละชุดสุ่มไม่เกิน 10 ข้อ พร้อมเฉลยและแหล่งอ้างอิง</p><div class="section">${topicRows()}</div></section>`);
+  bindTopics();
+}
+function start(mode, topic) {
+  const create = () => {
+    const old = load();
+    if (old) { try { localStorage.setItem(`${KEY}-previous`, JSON.stringify(old)); } catch { /* Main save reports failures. */ } }
+    session = makeSession(QUESTIONS, COMMANDS, mode, topic); save(); renderExam();
+  };
+  const saved = load();
+  if (saved && !saved.submitted) confirmAction('เริ่มชุดใหม่?', 'มีชุดที่ยังทำไม่เสร็จ ชุดใหม่จะเป็นชุดที่เปิดทำต่อได้จากหน้าหลัก ระบบจะสำรองชุดก่อนหน้าไว้ในเบราว์เซอร์นี้', 'เริ่มชุดใหม่', create);
+  else create();
+}
+function navButton(q, i) {
+  const answered = Boolean(session.answers[q.id]?.trim());
+  return `<button data-index="${i}" class="${answered ? 'done' : ''}" aria-current="${i === session.index}" aria-label="ข้อ ${i + 1}${answered ? ' ตอบแล้ว' : ''}">${i + 1}</button>`;
+}
+function renderExam() {
+  const n = session.questions.length;
+  page(`<section class="workspace"><div class="topline"><span class="eyebrow">${session.mode === 'exam' ? 'FINAL EXAM / 62 QUESTIONS / 74 POINTS' : 'TOPIC PRACTICE'}</span><button class="btn small map-toggle" id="map-toggle" aria-expanded="false" aria-controls="question-map">รายการข้อสอบ</button><button class="btn small" id="leave">บันทึกและออก ↗</button></div><div class="exam-layout"><div class="exam-main"><div class="progress" role="progressbar" aria-label="จำนวนข้อที่ตอบแล้ว" aria-valuemin="0" aria-valuemax="${n}" id="progress"><i></i></div><div id="question-body" class="question"></div><div class="exam-controls"><button class="btn" id="prev">← ก่อนหน้า</button><button class="btn primary" id="next">ข้อถัดไป →</button></div><p class="hint" id="save-status" role="status">บันทึกคำตอบอัตโนมัติในเบราว์เซอร์นี้</p></div><aside class="map-panel" id="question-map" aria-label="รายการข้อสอบ"><h3>รายการข้อสอบ</h3><p class="hint" id="answered-count" aria-live="polite"></p>${[true, false].map(mc => { const rows = session.questions.map((q, i) => ({ q, i })).filter(({ q }) => Boolean(q.options) === mc); return rows.length ? `<p class="map-part">${mc ? 'PART 1 / MULTIPLE CHOICE' : 'PART 2 / COMMANDS'}</p><div class="gridnav">${rows.map(({ q, i }) => navButton(q, i)).join('')}</div>` : ''; }).join('')}<p class="hint">● ตอบแล้ว · กรอบเขียวคือข้อปัจจุบัน</p><button class="btn small finish-link" id="finish">จบชุดและดูเฉลย</button></aside></div></section>`);
+  $('#prev').onclick = () => moveTo(session.index - 1);
+  $('#next').onclick = () => session.index < n - 1 ? moveTo(session.index + 1) : finish();
+  $('#leave').onclick = () => { save(); home(); };
+  $('#finish').onclick = finish;
+  $('#map-toggle').onclick = () => { const open = $('#question-map').classList.toggle('open'); $('#map-toggle').setAttribute('aria-expanded', open); };
+  document.querySelectorAll('[data-index]').forEach(b => b.onclick = () => moveTo(Number(b.dataset.index)));
+  renderQuestion(false); updateAnswerStatus();
+}
+function renderQuestion(focus) {
+  const q = session.questions[session.index], answer = session.answers[q.id] || '';
+  $('#question-body').innerHTML = `<div class="question-meta"><span>${q.options ? 'PART 1 · MULTIPLE CHOICE' : 'PART 2 · COMMANDS'} · ข้อ ${session.index + 1}/${session.questions.length}</span><span class="points">${q.options ? 1 : 2} คะแนน</span></div><p class="eyebrow">${esc(q.topic)}</p><h2 id="question-heading" tabindex="-1" lang="en">${esc(q.question)}</h2>${q.options ? `<fieldset aria-labelledby="question-heading">${q.options.map((option, i) => `<label class="option"><input type="radio" name="answer" value="${esc(option)}" ${answer === option ? 'checked' : ''}><span class="option-letter" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span class="option-copy" lang="en">${esc(option)}</span></label>`).join('')}</fieldset>` : `<div class="terminal"><div class="terminal-bar"><span>TERMINAL / COMMAND INPUT</span><span aria-hidden="true">&gt;_</span></div><label for="answer">พิมพ์คำสั่งของคุณ</label><textarea id="answer" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="$ your command here" lang="en">${esc(answer)}</textarea></div><p class="hint">คำสั่งที่ตรงกับเฉลยจะได้ 2 คะแนน คำตอบอื่นจะรอตรวจทานและให้คะแนนเองได้</p>`}${session.mode === 'practice' ? '<div class="actions"><button class="btn small" id="reveal">ตรวจคำตอบ</button></div><div id="feedback"></div>' : ''}`;
+  document.querySelectorAll('input[name="answer"]').forEach(input => input.onchange = () => recordAnswer(q, input.value));
+  if ($('#answer')) $('#answer').oninput = event => recordAnswer(q, event.target.value);
+  if ($('#reveal')) $('#reveal').onclick = () => { $('#feedback').innerHTML = feedback(q); $('#reveal').textContent = 'ตรวจคำตอบ'; };
+  $('#prev').disabled = session.index === 0;
+  $('#next').textContent = session.index === session.questions.length - 1 ? 'จบชุดและดูเฉลย →' : 'ข้อถัดไป →';
+  document.querySelectorAll('[data-index]').forEach(b => b.setAttribute('aria-current', Number(b.dataset.index) === session.index));
+  if (focus) {
+    const heading = $('#question-heading');
+    heading.focus({ preventScroll: true });
+    // Never push the viewport down after Next. Only recover a heading above the viewport.
+    const top = heading.getBoundingClientRect().top;
+    if (top < 24) window.scrollBy({ top: top - 24, behavior: 'instant' });
+  }
+}
+// Keep the inputs mounted: replacing the page here loses scroll, focus and text selection.
+function recordAnswer(q, value) {
+  session.answers[q.id] = value;
+  if (session.reviews) delete session.reviews[q.id];
+  save(); updateAnswerStatus();
+  const feedbackNode = $('#feedback');
+  if (feedbackNode?.textContent) $('#reveal').textContent = 'ตรวจคำตอบใหม่';
+}
+function updateAnswerStatus() {
+  const count = session.questions.filter(q => session.answers[q.id]?.trim()).length;
+  $('#answered-count').textContent = `ตอบแล้ว ${count} / ${session.questions.length} ข้อ`;
+  $('#progress').setAttribute('aria-valuenow', count);
+  $('#progress i').style.width = `${count / session.questions.length * 100}%`;
+  document.querySelectorAll('[data-index]').forEach(b => { const yes = Boolean(session.answers[session.questions[+b.dataset.index].id]?.trim()); b.classList.toggle('done', yes); b.setAttribute('aria-label', `ข้อ ${+b.dataset.index + 1}${yes ? ' ตอบแล้ว' : ''}`); });
+}
+function moveTo(index) {
+  if (index < 0 || index >= session.questions.length) return;
+  session.index = index; save();
+  $('#question-map').classList.remove('open'); $('#map-toggle').setAttribute('aria-expanded', 'false');
+  renderQuestion(true);
+}
+function finish() {
+  const missing = session.questions.filter(q => !session.answers[q.id]?.trim()).length;
+  confirmAction('จบชุดและเปิดเฉลย?', missing ? `ยังไม่ได้ตอบ ${missing} ข้อ เมื่อเปิดเฉลยแล้วจะไม่เปลี่ยนคำตอบในชุดนี้ แต่ยังตรวจทานคะแนนคำสั่งได้` : 'ระบบจะสรุปคะแนนปรนัยและตรวจคำสั่งเบื้องต้น พร้อมแสดงเฉลยและแหล่งอ้างอิง', 'เปิดเฉลย', () => { session.submitted = true; save(); results(); });
+}
+function gradeLabel(q) {
+  const grade = gradeQuestion(q, session);
+  return grade.pending ? 'รอตรวจทาน · ยังไม่รวมคะแนนข้อนี้' : `${grade.points} / ${q.options ? 1 : 2} คะแนน · ${grade.kind === 'auto' ? 'ตรงกับคำตอบที่ยอมรับ' : grade.kind === 'manual' ? 'ตรวจด้วยตนเอง' : grade.points ? 'ตอบถูก' : 'ทบทวนอีกครั้ง'}`;
+}
+function feedback(q) {
+  const grade = gradeQuestion(q, session);
+  return `<div class="answer ${grade.pending ? 'pending' : ''}"><strong>${grade.pending ? 'รอตรวจทาน' : q.options ? (grade.points ? 'ตอบถูก ✓' : 'คำตอบอ้างอิง') : grade.kind === 'auto' ? 'คำตอบที่ยอมรับ ✓' : 'คำตอบอ้างอิง · ตรวจทานแล้ว'}</strong><p><code lang="en">${esc(q.correct)}</code></p><p>${esc(q.explanation)}</p><p class="reference">แหล่งอ้างอิง · ${source(q)}</p></div>`;
+}
+function scoreMarkup() {
+  const s = scoreSession(session);
+  return `<div class="result-head"><div><div class="eyebrow">${session.mode === 'exam' ? 'FINAL EXAM' : 'TOPIC PRACTICE'} / SESSION REVIEW</div><h1>ทบทวนคำตอบ</h1><p class="hint">${s.pending ? `คะแนนเบื้องต้น · มีคำสั่งรอตรวจทาน ${s.pending} ข้อ` : 'ตรวจครบแล้ว · คะแนนชุดฝึกนี้'}</p></div><div class="result-total">${s.total}<span> / ${s.max}</span></div></div><div class="score-breakdown"><div><strong>${s.mc} / ${s.mcMax}</strong><span>ปรนัย · Multiple choice</span></div><div><strong>${s.short} / ${s.shortMax}</strong><span>คำตอบสั้น · Commands</span></div><div><strong>${String(s.pending).padStart(2, '0')}</strong><span>คำสั่งรอตรวจทาน</span></div></div>`;
+}
+function results() {
+  page(`<section class="workspace"><div id="score-summary" aria-live="polite">${scoreMarkup()}</div><div class="actions"><button class="btn primary" id="printQ">พิมพ์โจทย์ / PDF ↗</button><button class="btn" id="printA">พิมพ์เฉลย / PDF</button><button class="btn" id="again">สุ่มชุดสอบใหม่</button></div><p class="hint" id="save-status">คำตอบสั้นตรวจเทียบข้อความกับเฉลย คำสั่งทางเลือกต้องตรวจทานเอง ไม่ถือว่าผิดโดยอัตโนมัติ</p><div class="review-list"><div class="section-head"><h2>เฉลยทีละข้อ</h2><span class="hint">กดที่โจทย์เพื่อเปิดคำอธิบาย</span></div>${session.questions.map((q, i) => { const grade = gradeQuestion(q, session); return `<details class="review-item" ${i === 0 || grade.pending ? 'open' : ''}><summary><span class="review-number">${String(i + 1).padStart(2, '0')}</span><h3><span lang="en">${esc(q.question)}</span><span class="review-label ${grade.pending ? 'pending' : ''}" id="grade-${q.id}">${gradeLabel(q)}</span></h3></summary><div class="review-body"><p class="user-answer">คำตอบของคุณ · <code lang="en">${esc(session.answers[q.id] || '— ยังไม่ได้ตอบ')}</code></p>${feedback(q)}${!q.options && grade.kind !== 'auto' ? `<fieldset class="manual-review"><legend>ตรวจเทียบเฉลยและให้คะแนนข้อ ${i + 1} ด้วยตนเอง</legend>${[0, 1, 2].map(points => `<label><input type="radio" name="review-${q.id}" data-review="${q.id}" value="${points}" ${session.reviews?.[q.id] === points ? 'checked' : ''}>${points} คะแนน</label>`).join('')}</fieldset>` : ''}</div></details>`; }).join('')}</div></section>`);
+  $('#again').onclick = () => start('exam'); $('#printQ').onclick = () => printExam(false); $('#printA').onclick = () => printExam(true);
+  document.querySelectorAll('[data-review]').forEach(input => input.onchange = () => {
+    session.reviews ||= {}; session.reviews[input.dataset.review] = Number(input.value); save();
+    const q = session.questions.find(q => q.id === input.dataset.review);
+    const label = $(`#grade-${q.id}`); label.textContent = gradeLabel(q); label.classList.remove('pending');
+    const answer = input.closest('.review-body').querySelector('.answer'); answer.classList.remove('pending'); answer.querySelector('strong').textContent = 'คำตอบอ้างอิง · ตรวจทานแล้ว';
+    $('#score-summary').innerHTML = scoreMarkup();
+  });
+}
+async function printExam(key) {
+  $('#print').innerHTML = buildPrintMarkup(session, SOURCES, key);
+  await document.fonts.ready;
+  window.print();
+}
+function sources() {
+  page(`<section class="workspace"><div class="eyebrow">COURSE REFERENCES</div><h1 class="page-title">กลับไปอ่านต้นฉบับ</h1><p class="lead">ข้อสอบอ้างอิงเนื้อหาที่โพสต์หลัง 3 ก.ย. ใน Classroom พร้อมเลขสไลด์หรือช่วงวิดีโอในเฉลยแต่ละข้อ</p><ul class="source-list">${Object.values(SOURCES).map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)} ↗</a></li>`).join('')}</ul><p class="hint">เว็บนี้เป็นเครื่องมือฝึกทบทวน ไม่ใช่ข้อสอบจริงของอาจารย์</p></section>`, 'sources');
+}
+document.querySelectorAll('[data-view]').forEach(button => button.onclick = event => { event.preventDefault(); button.dataset.view === 'sources' ? sources() : home(); });
+home();
+
