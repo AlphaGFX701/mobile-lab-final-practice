@@ -129,7 +129,7 @@ function renderExam() {
 }
 function renderQuestion(focus) {
   const q = session.questions[session.index], answer = session.answers[q.id] || '';
-  $('#question-body').innerHTML = `<div class="question-meta"><span>${q.options ? 'PART 1 · MULTIPLE CHOICE' : 'PART 2 · COMMANDS'} · ข้อ ${session.index + 1}/${session.questions.length}</span><span class="points">${q.options ? 1 : 2} คะแนน</span></div><p class="eyebrow">${esc(q.topic)}</p><h2 id="question-heading" tabindex="-1" lang="en">${esc(q.question)}</h2>${q.options ? `<fieldset aria-labelledby="question-heading">${q.options.map((option, i) => `<label class="option"><input type="radio" name="answer" value="${esc(option)}" ${answer === option ? 'checked' : ''}><span class="option-letter" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span class="option-copy" lang="en">${esc(option)}</span></label>`).join('')}</fieldset>` : `<div class="terminal"><div class="terminal-bar"><span>TERMINAL / COMMAND INPUT</span><span aria-hidden="true">&gt;_</span></div><label for="answer">พิมพ์คำสั่งของคุณ</label><textarea id="answer" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="$ your command here" lang="en">${esc(answer)}</textarea></div><p class="hint">คำสั่งที่ตรงกับเฉลยจะได้ 2 คะแนน คำตอบอื่นจะรอตรวจทานและให้คะแนนเองได้</p>`}<div class="check-actions"><button class="btn primary check-button" id="reveal" type="button" aria-controls="feedback">ตรวจคำตอบ <span aria-hidden="true">↗</span></button><span class="check-caption">แสดงผลของข้อนี้ โดยไม่เปลี่ยนข้อ</span></div><div id="feedback" class="feedback-slot" role="status" aria-live="polite"></div>`;
+  $('#question-body').innerHTML = `<div class="question-meta"><span>${q.options ? 'PART 1 · MULTIPLE CHOICE' : 'PART 2 · COMMANDS'} · ข้อ ${session.index + 1}/${session.questions.length}</span><span class="points">${q.options ? 1 : 2} คะแนน</span></div><p class="eyebrow">${esc(q.topic)}</p><h2 id="question-heading" tabindex="-1" lang="en">${esc(q.question)}</h2>${q.options ? `<fieldset aria-labelledby="question-heading">${q.options.map((option, i) => `<label class="option"><input type="radio" name="answer" value="${esc(option)}" ${answer === option ? 'checked' : ''}><span class="option-letter" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span class="option-copy" lang="en">${esc(option)}</span></label>`).join('')}</fieldset>` : `<div class="terminal"><div class="terminal-bar"><span>TERMINAL / COMMAND INPUT</span><span aria-hidden="true">&gt;_</span></div><label for="answer">พิมพ์คำสั่งของคุณ</label><textarea id="answer" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="$ your command here" lang="en">${esc(answer)}</textarea></div><p class="hint">คำสั่งที่ตรงกับเฉลยจะได้ 2 คะแนน คำตอบอื่นจะรอตรวจทานและให้คะแนนเองได้</p>`}<div class="check-actions"><button class="btn primary check-button" id="reveal" type="button" aria-haspopup="dialog" aria-controls="review-dialog">ตรวจคำตอบ <span aria-hidden="true">↗</span></button><span class="check-caption" role="status" aria-live="polite">แสดงผลของข้อนี้ โดยไม่เปลี่ยนข้อ</span></div>`;
   document.querySelectorAll('input[name="answer"]').forEach(input => input.onchange = () => recordAnswer(q, input.value));
   if ($('#answer')) $('#answer').oninput = event => recordAnswer(q, event.target.value);
   $('#reveal').onclick = () => checkCurrentAnswer(q);
@@ -149,28 +149,40 @@ function recordAnswer(q, value) {
   session.answers[q.id] = value;
   if (session.reviews) delete session.reviews[q.id];
   save(); updateAnswerStatus();
-  const feedbackNode = $('#feedback');
-  if (feedbackNode?.textContent) {
-    const hadResult = Boolean(feedbackNode.querySelector('.check-result'));
-    feedbackNode.replaceChildren();
-    $('#reveal').innerHTML = `${hadResult ? 'ตรวจคำตอบใหม่' : 'ตรวจคำตอบ'} <span aria-hidden="true">↗</span>`;
-    const caption = $('.check-caption');
-    caption.textContent = hadResult ? 'เปลี่ยนคำตอบแล้ว กดตรวจอีกครั้ง' : 'แสดงผลของข้อนี้ โดยไม่เปลี่ยนข้อ';
-    caption.dataset.state = '';
-  }
+  const caption = $('.check-caption');
+  const wasReviewed = caption.dataset.reviewed === 'true';
+  if (!wasReviewed && caption.dataset.state !== 'empty') return;
+  $('#reveal').innerHTML = `${wasReviewed ? 'ตรวจคำตอบใหม่' : 'ตรวจคำตอบ'} <span aria-hidden="true">↗</span>`;
+  caption.textContent = wasReviewed ? 'เปลี่ยนคำตอบแล้ว กดตรวจอีกครั้ง' : 'แสดงผลของข้อนี้ โดยไม่เปลี่ยนข้อ';
+  caption.dataset.state = '';
+  caption.dataset.reviewed = 'false';
 }
 function checkCurrentAnswer(q) {
-  const feedbackNode = $('#feedback');
   const answer = session.answers[q.id]?.trim();
-  const before = window.scrollY;
-  feedbackNode.innerHTML = answer ? inlineFeedback(q) : '<p class="check-empty">กรุณาเลือกหรือพิมพ์คำตอบก่อนกดตรวจ</p>';
-  $('#reveal').innerHTML = 'ตรวจคำตอบ <span aria-hidden="true">↗</span>';
   const caption = $('.check-caption');
-  const grade = answer ? gradeQuestion(q, session) : null;
-  caption.textContent = !grade ? 'ยังไม่ได้ตอบข้อนี้' : grade.pending ? 'รอตรวจทาน · ดูเฉลยด้านล่าง' : grade.points ? 'ตอบถูก · ดูคำอธิบายด้านล่าง' : 'ควรทบทวน · ดูเฉลยด้านล่าง';
-  caption.dataset.state = !grade ? 'empty' : grade.pending ? 'pending' : grade.points ? 'correct' : 'incorrect';
-  // Feedback expands below the focused button. Preserve the reader's place even near the page bottom.
-  if (window.scrollY !== before) window.scrollTo({ top: before, behavior: 'instant' });
+  if (!answer) {
+    caption.textContent = 'กรุณาเลือกหรือพิมพ์คำตอบก่อนกดตรวจ';
+    caption.dataset.state = 'empty';
+    return;
+  }
+  const grade = gradeQuestion(q, session);
+  caption.textContent = grade.pending ? 'รอตรวจทาน · เปิดเฉลยอีกครั้งได้' : grade.points ? 'ตอบถูก · เปิดคำอธิบายอีกครั้งได้' : 'ควรทบทวน · เปิดเฉลยอีกครั้งได้';
+  caption.dataset.state = grade.pending ? 'pending' : grade.points ? 'correct' : 'incorrect';
+  caption.dataset.reviewed = 'true';
+  $('#reveal').innerHTML = 'ดูเฉลยอีกครั้ง <span aria-hidden="true">↗</span>';
+  openReview(q);
+}
+let reviewOrigin = null, reviewScrollY = 0;
+function openReview(q) {
+  const dialog = $('#review-dialog');
+  reviewOrigin = $('#reveal');
+  reviewScrollY = window.scrollY;
+  $('#review-dialog-meta').textContent = `${q.options ? 'PART 1 · MULTIPLE CHOICE' : 'PART 2 · COMMANDS'} · ข้อ ${session.index + 1}/${session.questions.length}`;
+  $('#review-dialog-body').innerHTML = inlineFeedback(q);
+  $('#review-dialog-body').scrollTop = 0;
+  $('#review-next').textContent = session.index === session.questions.length - 1 ? 'จบชุด →' : 'ข้อถัดไป →';
+  dialog.returnValue = '';
+  dialog.showModal();
 }
 function inlineFeedback(q) {
   const grade = gradeQuestion(q, session);
@@ -228,6 +240,31 @@ async function printExam(key) {
 function sources() {
   page(`<section class="workspace"><div class="eyebrow">COURSE REFERENCES</div><h1 class="page-title">กลับไปอ่านต้นฉบับ</h1><p class="lead">ข้อสอบอ้างอิงเนื้อหาที่โพสต์หลัง 3 ก.ย. ใน Classroom พร้อมเลขสไลด์หรือช่วงวิดีโอในเฉลยแต่ละข้อ</p><ul class="source-list">${Object.values(SOURCES).map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)} ↗</a></li>`).join('')}</ul><p class="hint">เว็บนี้เป็นเครื่องมือฝึกทบทวน ไม่ใช่ข้อสอบจริงของอาจารย์</p></section>`, 'sources');
 }
+const reviewDialog = $('#review-dialog');
+$('#review-close').onclick = () => reviewDialog.close('back');
+$('#review-back').onclick = () => reviewDialog.close('back');
+$('#review-next').onclick = () => {
+  const last = session.index === session.questions.length - 1;
+  reviewDialog.close(last ? 'finish' : 'next');
+  if (last) finish();
+  else moveTo(session.index + 1);
+};
+reviewDialog.addEventListener('close', () => {
+  if (['next', 'finish'].includes(reviewDialog.returnValue)) return;
+  if (reviewOrigin?.isConnected) reviewOrigin.focus({ preventScroll: true });
+  window.scrollTo({ top: reviewScrollY, behavior: 'instant' });
+});
+reviewDialog.addEventListener('keydown', event => {
+  if (event.key !== 'Tab') return;
+  const controls = [...reviewDialog.querySelectorAll('button:not([disabled]), a[href]')];
+  const first = controls[0], last = controls.at(-1);
+  if (!first || !last) return;
+  if (event.shiftKey && (document.activeElement === first || !reviewDialog.contains(document.activeElement))) {
+    event.preventDefault(); last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !reviewDialog.contains(document.activeElement))) {
+    event.preventDefault(); first.focus();
+  }
+});
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = event => { event.preventDefault(); button.dataset.view === 'sources' ? sources() : home(); });
 const themeButton = document.createElement('button');
 themeButton.type = 'button'; themeButton.className = 'theme-toggle';
