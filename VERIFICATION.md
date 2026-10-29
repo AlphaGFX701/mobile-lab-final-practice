@@ -31,3 +31,5 @@ Ready artifacts: dist/, MobileLab-deploy.zip, vercel.json (Vite, npm run build, 
 
 Tests used isolated origins 5173 and 4173. The user's session at 8765 was not overwritten by QA.
 
+
+Git deployment: source published to private repository AlphaGFX701/mobile-lab-final-practice. Existing Vercel project connected to that repository through the dashboard; production branch main. Browser file upload is no longer needed.
