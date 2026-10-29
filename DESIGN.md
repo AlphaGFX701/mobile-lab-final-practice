@@ -10,9 +10,10 @@ colors:
   muted: '#A5B0A7'
   border: '#2B352D'
   warning: '#F1C27A'
+  review: '#F1A597'
 typography:
   sans:
-    fontFamily: 'IBM Plex Sans Thai, sans-serif'
+    fontFamily: 'Sarabun, Noto Sans Thai, sans-serif'
   mono:
     fontFamily: 'IBM Plex Mono, monospace'
 rounded:
@@ -46,15 +47,19 @@ The visual signature is a graphite phone under green rim lighting with restraine
 These are design references only. They do not supply exam content. mock.html records the three-screen layout study inspected before app integration.
 
 ## Runtime token ownership
-style.css :root is the sole runtime token owner. The palette above maps to --bg, --panel, --green, --text, --muted, --line and --warn respectively; fonts map to --sans and --mono. app.js uses shared classes and no independent theme. scene.js necessarily maps the approved graphite/green palette to Three.js materials and a canvas texture. Changes to palette require updating this file, CSS and scene together.
+style.css :root is the sole runtime token owner. The palette above maps to --bg, --panel, --green, --text, --muted, --line, --warn and --wrong respectively; fonts map to --sans and --mono. app.js uses shared classes and no independent theme. scene.js necessarily maps the approved graphite/green palette to Three.js materials and a canvas texture. Changes to palette require updating this file, CSS and scene together.
 
 ## Typography and layout
-IBM Plex Sans Thai provides both Thai text and English question copy. IBM Plex Mono is reserved for commands, metadata and scores. Google Fonts has local sans-serif/monospace fallbacks. Body line-height is 1.65; Thai explanatory paragraphs use 1.85–1.9. Headings scale with clamp. Long commands wrap without truncation.
+Sarabun provides Thai and English reading text. IBM Plex Mono is reserved for commands, metadata, timers and scores. Google Fonts has local sans-serif/monospace fallbacks. Body line-height is 1.7; Thai explanatory paragraphs use 1.85–1.9. Headings scale with clamp. Long commands wrap without truncation.
+
+The light theme is an approved companion to the original dark lab: CSS variables own both schemes. Light uses #f5f7f3 background, #e8eee5 panel, #356c29 accent, #1b281d text and #526557 secondary text. The theme preference is browser-local. A compact, optional timer sits in normal document flow above exam questions, preserving focus and scroll position. Countdown expiry warns without submitting; elapsed duration continues to be tracked until paused or submitted.
 
 1328px shell, 48px desktop gutters, 28px tablet, 20px phone, 16px at <=360px. The home hero is two columns above 760px, with actions before the model on phones. Exam layout is a flexible question area plus 250px sidebar. At <=760px the question map is toggled above the question; previous/next stay in document flow so they cannot obscure answers. No viewport-height locks. Scrollbar gutter remains stable.
 
 ## Components and states
 Shared .btn provides outlined secondary, filled green primary, hover border and pressed 1px offset. Native checked radio plus green border indicates selection; color is never the only signal. :focus-visible is a 2px green outline. Disabled controls lower opacity and cannot fire. Pending command grades use muted amber text, never an incorrect red grade.
+
+Both exam and topic practice show the same primary “ตรวจคำตอบ” action immediately after the answer input. The compact status beside it reports the result without navigation; the in-place diagnostic panel distinguishes the student's answer, reference answer, Thai explanation, and course source. Correct uses green, review uses coral, and commands needing human judgment use amber, always with explicit text and an icon. Changing an answer clears the stale panel and offers “ตรวจคำตอบใหม่”. Checking an unanswered question gives a local prompt. The panel uses the existing light/dark tokens and only fades opacity; it does not move the question or force scrolling.
 
 Native dialog confirms replacement of an unfinished session and ending a set. Backdrop dims the app; Escape cancels; focus is contained and restored by the browser. No custom select or menu is needed. Topic rows use fine dividers; only controls, terminal and question rows use modest radii. No box shadows on exam/review surfaces.
 

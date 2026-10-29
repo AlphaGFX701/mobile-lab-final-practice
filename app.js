@@ -1,9 +1,10 @@
 import { buildPrintMarkup } from './print-document.js';
 import { makeSession, gradeQuestion, scoreSession } from './exam-core.js';
+import { newTimer, elapsedTime, displayTime, formatTime, pauseTimer } from './timer.js';
 
 const app = document.querySelector('#app');
 const KEY = 'mobilelab-v1';
-let session = null, sceneCleanup = null, viewVersion = 0;
+let session = null, sceneCleanup = null, viewVersion = 0, timerInterval = null;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $ = selector => document.querySelector(selector);
 const topicsData = [
@@ -24,6 +25,7 @@ function save() {
   catch { const status = $('#save-status'); if (status) { status.textContent = 'บันทึกไม่ได้ กรุณาอย่าปิดหน้านี้จนกว่าจะทบทวนเสร็จ'; status.classList.add('save-warning'); } return false; }
 }
 function page(html, name = '') {
+  clearInterval(timerInterval); timerInterval = null;
   sceneCleanup?.(); sceneCleanup = null; viewVersion++;
   app.innerHTML = html;
   document.querySelectorAll('nav [data-view]').forEach(b => b.setAttribute('aria-current', b.dataset.view === name ? 'page' : 'false'));
@@ -73,9 +75,50 @@ function navButton(q, i) {
   const answered = Boolean(session.answers[q.id]?.trim());
   return `<button data-index="${i}" class="${answered ? 'done' : ''}" aria-current="${i === session.index}" aria-label="ข้อ ${i + 1}${answered ? ' ตอบแล้ว' : ''}">${i + 1}</button>`;
 }
+function mountTimer() {
+  const timer = session.timer || newTimer();
+  const host = document.createElement('div');
+  host.className = 'timer-wrap';
+  host.innerHTML = `<details class="timer-panel"><summary><span class="timer-icon" aria-hidden="true">◷</span><span>จับเวลา</span><span class="timer-readout" id="timer-summary">${formatTime(displayTime(timer))}</span><span class="timer-chevron" aria-hidden="true">⌄</span></summary><div class="timer-controls"><label for="timer-mode">รูปแบบ</label><select id="timer-mode"><option value="elapsed">เวลาที่ใช้ไป</option><option value="countdown">นับถอยหลัง</option></select><div id="timer-duration-row"><label for="timer-minutes">กำหนดเวลา (นาที)</label><input id="timer-minutes" type="number" min="1" max="1440" step="1" inputmode="numeric" value="${timer.duration / 60000}"></div><p class="timer-help">เปลี่ยนรูปแบบหรือเวลาได้หลังรีเซ็ต</p><div class="timer-actions"><button class="btn small primary" id="timer-start" type="button">เริ่มจับเวลา</button><button class="btn small" id="timer-reset" type="button">รีเซ็ต</button></div><p id="timer-message" class="timer-message" role="status"></p></div></details>`;
+  const alert = document.createElement('p'); alert.className = 'timer-alert'; alert.setAttribute('role', 'status'); host.append(alert);
+  $('.topline').after(host);
+  const mode = $('#timer-mode'), minutes = $('#timer-minutes'), row = $('#timer-duration-row'), start = $('#timer-start'), message = $('#timer-message');
+  message.hidden = true; // The persistent alert below the panel announces expiry, including when collapsed.
+  mode.value = timer.mode;
+  const paint = () => {
+    const hasRun = timer.startedAt !== null || timer.elapsed > 0;
+    row.hidden = timer.mode !== 'countdown'; mode.disabled = hasRun; minutes.disabled = hasRun;
+    start.textContent = timer.startedAt === null ? (timer.elapsed > 0 ? 'จับเวลาต่อ' : 'เริ่มจับเวลา') : 'หยุดชั่วคราว';
+    $('#timer-summary').textContent = formatTime(displayTime(timer));
+    if (timer.mode === 'countdown' && elapsedTime(timer) >= timer.duration && hasRun) {
+      if (!timer.expired) { timer.expired = true; session.timer = timer; save(); }
+      message.textContent = 'หมดเวลาแล้ว คุณยังทำข้อสอบต่อและส่งเองได้';
+      alert.textContent = 'หมดเวลาแล้ว คุณยังทำข้อสอบต่อและส่งเองได้';
+      host.classList.add('timer-expired');
+    } else { message.textContent = ''; alert.textContent = ''; host.classList.remove('timer-expired'); }
+  };
+  mode.onchange = () => { timer.mode = mode.value; timer.expired = false; session.timer = timer; save(); paint(); };
+  minutes.onchange = () => {
+    const value = Number(minutes.value);
+    if (!Number.isInteger(value) || value < 1 || value > 1440) { minutes.setCustomValidity('กรุณากรอกเวลา 1–1440 นาที'); minutes.reportValidity(); return; }
+    minutes.setCustomValidity(''); timer.duration = value * 60000; timer.expired = false; session.timer = timer; save(); paint();
+  };
+  minutes.oninput = () => minutes.setCustomValidity('');
+  start.onclick = () => {
+    if (timer.startedAt !== null) pauseTimer(timer);
+    else {
+      if (timer.mode === 'countdown') { const value = Number(minutes.value); if (!Number.isInteger(value) || value < 1 || value > 1440) { minutes.setCustomValidity('กรุณากรอกเวลา 1–1440 นาที'); minutes.reportValidity(); return; } timer.duration = value * 60000; }
+      timer.startedAt = Date.now();
+    }
+    session.timer = timer; save(); paint();
+  };
+  $('#timer-reset').onclick = () => { timer.elapsed = 0; timer.startedAt = null; timer.expired = false; session.timer = timer; save(); paint(); };
+  paint(); timerInterval = setInterval(paint, 1000);
+}
 function renderExam() {
   const n = session.questions.length;
   page(`<section class="workspace"><div class="topline"><span class="eyebrow">${session.mode === 'exam' ? 'FINAL EXAM / 62 QUESTIONS / 74 POINTS' : 'TOPIC PRACTICE'}</span><button class="btn small map-toggle" id="map-toggle" aria-expanded="false" aria-controls="question-map">รายการข้อสอบ</button><button class="btn small" id="leave">บันทึกและออก ↗</button></div><div class="exam-layout"><div class="exam-main"><div class="progress" role="progressbar" aria-label="จำนวนข้อที่ตอบแล้ว" aria-valuemin="0" aria-valuemax="${n}" id="progress"><i></i></div><div id="question-body" class="question"></div><div class="exam-controls"><button class="btn" id="prev">← ก่อนหน้า</button><button class="btn primary" id="next">ข้อถัดไป →</button></div><p class="hint" id="save-status" role="status">บันทึกคำตอบอัตโนมัติในเบราว์เซอร์นี้</p></div><aside class="map-panel" id="question-map" aria-label="รายการข้อสอบ"><h3>รายการข้อสอบ</h3><p class="hint" id="answered-count" aria-live="polite"></p>${[true, false].map(mc => { const rows = session.questions.map((q, i) => ({ q, i })).filter(({ q }) => Boolean(q.options) === mc); return rows.length ? `<p class="map-part">${mc ? 'PART 1 / MULTIPLE CHOICE' : 'PART 2 / COMMANDS'}</p><div class="gridnav">${rows.map(({ q, i }) => navButton(q, i)).join('')}</div>` : ''; }).join('')}<p class="hint">● ตอบแล้ว · กรอบเขียวคือข้อปัจจุบัน</p><button class="btn small finish-link" id="finish">จบชุดและดูเฉลย</button></aside></div></section>`);
+  mountTimer();
   $('#prev').onclick = () => moveTo(session.index - 1);
   $('#next').onclick = () => session.index < n - 1 ? moveTo(session.index + 1) : finish();
   $('#leave').onclick = () => { save(); home(); };
@@ -86,10 +129,10 @@ function renderExam() {
 }
 function renderQuestion(focus) {
   const q = session.questions[session.index], answer = session.answers[q.id] || '';
-  $('#question-body').innerHTML = `<div class="question-meta"><span>${q.options ? 'PART 1 · MULTIPLE CHOICE' : 'PART 2 · COMMANDS'} · ข้อ ${session.index + 1}/${session.questions.length}</span><span class="points">${q.options ? 1 : 2} คะแนน</span></div><p class="eyebrow">${esc(q.topic)}</p><h2 id="question-heading" tabindex="-1" lang="en">${esc(q.question)}</h2>${q.options ? `<fieldset aria-labelledby="question-heading">${q.options.map((option, i) => `<label class="option"><input type="radio" name="answer" value="${esc(option)}" ${answer === option ? 'checked' : ''}><span class="option-letter" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span class="option-copy" lang="en">${esc(option)}</span></label>`).join('')}</fieldset>` : `<div class="terminal"><div class="terminal-bar"><span>TERMINAL / COMMAND INPUT</span><span aria-hidden="true">&gt;_</span></div><label for="answer">พิมพ์คำสั่งของคุณ</label><textarea id="answer" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="$ your command here" lang="en">${esc(answer)}</textarea></div><p class="hint">คำสั่งที่ตรงกับเฉลยจะได้ 2 คะแนน คำตอบอื่นจะรอตรวจทานและให้คะแนนเองได้</p>`}${session.mode === 'practice' ? '<div class="actions"><button class="btn small" id="reveal">ตรวจคำตอบ</button></div><div id="feedback"></div>' : ''}`;
+  $('#question-body').innerHTML = `<div class="question-meta"><span>${q.options ? 'PART 1 · MULTIPLE CHOICE' : 'PART 2 · COMMANDS'} · ข้อ ${session.index + 1}/${session.questions.length}</span><span class="points">${q.options ? 1 : 2} คะแนน</span></div><p class="eyebrow">${esc(q.topic)}</p><h2 id="question-heading" tabindex="-1" lang="en">${esc(q.question)}</h2>${q.options ? `<fieldset aria-labelledby="question-heading">${q.options.map((option, i) => `<label class="option"><input type="radio" name="answer" value="${esc(option)}" ${answer === option ? 'checked' : ''}><span class="option-letter" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span class="option-copy" lang="en">${esc(option)}</span></label>`).join('')}</fieldset>` : `<div class="terminal"><div class="terminal-bar"><span>TERMINAL / COMMAND INPUT</span><span aria-hidden="true">&gt;_</span></div><label for="answer">พิมพ์คำสั่งของคุณ</label><textarea id="answer" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="$ your command here" lang="en">${esc(answer)}</textarea></div><p class="hint">คำสั่งที่ตรงกับเฉลยจะได้ 2 คะแนน คำตอบอื่นจะรอตรวจทานและให้คะแนนเองได้</p>`}<div class="check-actions"><button class="btn primary check-button" id="reveal" type="button" aria-controls="feedback">ตรวจคำตอบ <span aria-hidden="true">↗</span></button><span class="check-caption">แสดงผลของข้อนี้ โดยไม่เปลี่ยนข้อ</span></div><div id="feedback" class="feedback-slot" role="status" aria-live="polite"></div>`;
   document.querySelectorAll('input[name="answer"]').forEach(input => input.onchange = () => recordAnswer(q, input.value));
   if ($('#answer')) $('#answer').oninput = event => recordAnswer(q, event.target.value);
-  if ($('#reveal')) $('#reveal').onclick = () => { $('#feedback').innerHTML = feedback(q); $('#reveal').textContent = 'ตรวจคำตอบ'; };
+  $('#reveal').onclick = () => checkCurrentAnswer(q);
   $('#prev').disabled = session.index === 0;
   $('#next').textContent = session.index === session.questions.length - 1 ? 'จบชุดและดูเฉลย →' : 'ข้อถัดไป →';
   document.querySelectorAll('[data-index]').forEach(b => b.setAttribute('aria-current', Number(b.dataset.index) === session.index));
@@ -107,7 +150,34 @@ function recordAnswer(q, value) {
   if (session.reviews) delete session.reviews[q.id];
   save(); updateAnswerStatus();
   const feedbackNode = $('#feedback');
-  if (feedbackNode?.textContent) $('#reveal').textContent = 'ตรวจคำตอบใหม่';
+  if (feedbackNode?.textContent) {
+    const hadResult = Boolean(feedbackNode.querySelector('.check-result'));
+    feedbackNode.replaceChildren();
+    $('#reveal').innerHTML = `${hadResult ? 'ตรวจคำตอบใหม่' : 'ตรวจคำตอบ'} <span aria-hidden="true">↗</span>`;
+    const caption = $('.check-caption');
+    caption.textContent = hadResult ? 'เปลี่ยนคำตอบแล้ว กดตรวจอีกครั้ง' : 'แสดงผลของข้อนี้ โดยไม่เปลี่ยนข้อ';
+    caption.dataset.state = '';
+  }
+}
+function checkCurrentAnswer(q) {
+  const feedbackNode = $('#feedback');
+  const answer = session.answers[q.id]?.trim();
+  const before = window.scrollY;
+  feedbackNode.innerHTML = answer ? inlineFeedback(q) : '<p class="check-empty">กรุณาเลือกหรือพิมพ์คำตอบก่อนกดตรวจ</p>';
+  $('#reveal').innerHTML = 'ตรวจคำตอบ <span aria-hidden="true">↗</span>';
+  const caption = $('.check-caption');
+  const grade = answer ? gradeQuestion(q, session) : null;
+  caption.textContent = !grade ? 'ยังไม่ได้ตอบข้อนี้' : grade.pending ? 'รอตรวจทาน · ดูเฉลยด้านล่าง' : grade.points ? 'ตอบถูก · ดูคำอธิบายด้านล่าง' : 'ควรทบทวน · ดูเฉลยด้านล่าง';
+  caption.dataset.state = !grade ? 'empty' : grade.pending ? 'pending' : grade.points ? 'correct' : 'incorrect';
+  // Feedback expands below the focused button. Preserve the reader's place even near the page bottom.
+  if (window.scrollY !== before) window.scrollTo({ top: before, behavior: 'instant' });
+}
+function inlineFeedback(q) {
+  const grade = gradeQuestion(q, session);
+  const state = grade.pending ? 'pending' : grade.points ? 'correct' : 'incorrect';
+  const title = grade.pending ? 'รอตรวจทานคำสั่ง' : grade.points ? 'ตอบถูก' : 'ควรทบทวนข้อนี้';
+  const note = grade.pending ? 'คำสั่งนี้ไม่ตรงกับข้อความที่ระบบยอมรับ โปรดเทียบกับเฉลยและให้คะแนนเองเมื่อจบชุด' : grade.points ? 'ตรงกับคำตอบที่ยอมรับ' : 'ดูคำตอบอ้างอิงและคำอธิบายด้านล่าง';
+  return `<section class="check-result ${state}" aria-label="ผลตรวจคำตอบข้อปัจจุบัน"><div class="check-result-head"><span class="check-symbol" aria-hidden="true">${grade.pending ? '◇' : grade.points ? '✓' : '!'}</span><div><strong>${title}</strong><p>${note}</p></div><span class="check-score">${grade.pending ? 'รอตรวจ' : `${grade.points}/${q.options ? 1 : 2}`}</span></div><div class="check-comparison"><div><span>คำตอบของคุณ</span><code lang="en">${esc(session.answers[q.id].trim())}</code></div><div><span>คำตอบอ้างอิง</span><code lang="en">${esc(q.correct)}</code></div></div><div class="check-explanation"><span>ทำความเข้าใจ</span><p>${esc(q.explanation)}</p><p class="reference">แหล่งอ้างอิง · ${source(q)}</p></div></section>`;
 }
 function updateAnswerStatus() {
   const count = session.questions.filter(q => session.answers[q.id]?.trim()).length;
@@ -121,10 +191,11 @@ function moveTo(index) {
   session.index = index; save();
   $('#question-map').classList.remove('open'); $('#map-toggle').setAttribute('aria-expanded', 'false');
   renderQuestion(true);
+  const body = $('#question-body'); body.classList.remove('question-enter'); void body.offsetWidth; body.classList.add('question-enter');
 }
 function finish() {
   const missing = session.questions.filter(q => !session.answers[q.id]?.trim()).length;
-  confirmAction('จบชุดและเปิดเฉลย?', missing ? `ยังไม่ได้ตอบ ${missing} ข้อ เมื่อเปิดเฉลยแล้วจะไม่เปลี่ยนคำตอบในชุดนี้ แต่ยังตรวจทานคะแนนคำสั่งได้` : 'ระบบจะสรุปคะแนนปรนัยและตรวจคำสั่งเบื้องต้น พร้อมแสดงเฉลยและแหล่งอ้างอิง', 'เปิดเฉลย', () => { session.submitted = true; save(); results(); });
+  confirmAction('จบชุดและเปิดเฉลย?', missing ? `ยังไม่ได้ตอบ ${missing} ข้อ เมื่อเปิดเฉลยแล้วจะไม่เปลี่ยนคำตอบในชุดนี้ แต่ยังตรวจทานคะแนนคำสั่งได้` : 'ระบบจะสรุปคะแนนปรนัยและตรวจคำสั่งเบื้องต้น พร้อมแสดงเฉลยและแหล่งอ้างอิง', 'เปิดเฉลย', () => { if (session.timer) pauseTimer(session.timer); session.submitted = true; save(); results(); });
 }
 function gradeLabel(q) {
   const grade = gradeQuestion(q, session);
@@ -136,7 +207,7 @@ function feedback(q) {
 }
 function scoreMarkup() {
   const s = scoreSession(session);
-  return `<div class="result-head"><div><div class="eyebrow">${session.mode === 'exam' ? 'FINAL EXAM' : 'TOPIC PRACTICE'} / SESSION REVIEW</div><h1>ทบทวนคำตอบ</h1><p class="hint">${s.pending ? `คะแนนเบื้องต้น · มีคำสั่งรอตรวจทาน ${s.pending} ข้อ` : 'ตรวจครบแล้ว · คะแนนชุดฝึกนี้'}</p></div><div class="result-total">${s.total}<span> / ${s.max}</span></div></div><div class="score-breakdown"><div><strong>${s.mc} / ${s.mcMax}</strong><span>ปรนัย · Multiple choice</span></div><div><strong>${s.short} / ${s.shortMax}</strong><span>คำตอบสั้น · Commands</span></div><div><strong>${String(s.pending).padStart(2, '0')}</strong><span>คำสั่งรอตรวจทาน</span></div></div>`;
+  return `<div class="result-head"><div><div class="eyebrow">${session.mode === 'exam' ? 'FINAL EXAM' : 'TOPIC PRACTICE'} / SESSION REVIEW</div><h1>ทบทวนคำตอบ</h1><p class="hint">${s.pending ? `คะแนนเบื้องต้น · มีคำสั่งรอตรวจทาน ${s.pending} ข้อ` : 'ตรวจครบแล้ว · คะแนนชุดฝึกนี้'}${session.timer ? ` · เวลาที่จับ ${formatTime(elapsedTime(session.timer))}` : ''}</p></div><div class="result-total">${s.total}<span> / ${s.max}</span></div></div><div class="score-breakdown"><div><strong>${s.mc} / ${s.mcMax}</strong><span>ปรนัย · Multiple choice</span></div><div><strong>${s.short} / ${s.shortMax}</strong><span>คำตอบสั้น · Commands</span></div><div><strong>${String(s.pending).padStart(2, '0')}</strong><span>คำสั่งรอตรวจทาน</span></div></div>`;
 }
 function results() {
   page(`<section class="workspace"><div id="score-summary" aria-live="polite">${scoreMarkup()}</div><div class="actions"><button class="btn primary" id="printQ">พิมพ์โจทย์ / PDF ↗</button><button class="btn" id="printA">พิมพ์เฉลย / PDF</button><button class="btn" id="again">สุ่มชุดสอบใหม่</button></div><p class="hint" id="save-status">คำตอบสั้นตรวจเทียบข้อความกับเฉลย คำสั่งทางเลือกต้องตรวจทานเอง ไม่ถือว่าผิดโดยอัตโนมัติ</p><div class="review-list"><div class="section-head"><h2>เฉลยทีละข้อ</h2><span class="hint">กดที่โจทย์เพื่อเปิดคำอธิบาย</span></div>${session.questions.map((q, i) => { const grade = gradeQuestion(q, session); return `<details class="review-item" ${i === 0 || grade.pending ? 'open' : ''}><summary><span class="review-number">${String(i + 1).padStart(2, '0')}</span><h3><span lang="en">${esc(q.question)}</span><span class="review-label ${grade.pending ? 'pending' : ''}" id="grade-${q.id}">${gradeLabel(q)}</span></h3></summary><div class="review-body"><p class="user-answer">คำตอบของคุณ · <code lang="en">${esc(session.answers[q.id] || '— ยังไม่ได้ตอบ')}</code></p>${feedback(q)}${!q.options && grade.kind !== 'auto' ? `<fieldset class="manual-review"><legend>ตรวจเทียบเฉลยและให้คะแนนข้อ ${i + 1} ด้วยตนเอง</legend>${[0, 1, 2].map(points => `<label><input type="radio" name="review-${q.id}" data-review="${q.id}" value="${points}" ${session.reviews?.[q.id] === points ? 'checked' : ''}>${points} คะแนน</label>`).join('')}</fieldset>` : ''}</div></details>`; }).join('')}</div></section>`);
@@ -158,5 +229,11 @@ function sources() {
   page(`<section class="workspace"><div class="eyebrow">COURSE REFERENCES</div><h1 class="page-title">กลับไปอ่านต้นฉบับ</h1><p class="lead">ข้อสอบอ้างอิงเนื้อหาที่โพสต์หลัง 3 ก.ย. ใน Classroom พร้อมเลขสไลด์หรือช่วงวิดีโอในเฉลยแต่ละข้อ</p><ul class="source-list">${Object.values(SOURCES).map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)} ↗</a></li>`).join('')}</ul><p class="hint">เว็บนี้เป็นเครื่องมือฝึกทบทวน ไม่ใช่ข้อสอบจริงของอาจารย์</p></section>`, 'sources');
 }
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = event => { event.preventDefault(); button.dataset.view === 'sources' ? sources() : home(); });
+const themeButton = document.createElement('button');
+themeButton.type = 'button'; themeButton.className = 'theme-toggle';
+document.querySelector('header nav').append(themeButton);
+function updateThemeButton() { const light = document.documentElement.dataset.theme === 'light'; themeButton.innerHTML = `<span aria-hidden="true">${light ? '☾' : '☼'}</span> ${light ? 'ธีมมืด' : 'ธีมสว่าง'}`; themeButton.setAttribute('aria-label', light ? 'เปลี่ยนเป็นธีมมืด' : 'เปลี่ยนเป็นธีมสว่าง'); }
+themeButton.onclick = () => { const root = document.documentElement; root.classList.add('theme-transition'); root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('mobilelab-theme', root.dataset.theme); } catch {} updateThemeButton(); window.setTimeout(() => root.classList.remove('theme-transition'), 400); };
+updateThemeButton();
 home();
 

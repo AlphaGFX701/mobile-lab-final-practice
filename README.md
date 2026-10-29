@@ -1,6 +1,6 @@
 # Mobile Lab
 
-Final exam practice for Mobile Application Development. English questions, Thai explanations and course references. Full sets contain 50 multiple-choice questions and 12 command questions, worth 74 points. Answers are saved locally in the browser.
+Final exam practice for Mobile Application Development. English questions, Thai explanations and course references. Full sets contain 50 multiple-choice questions and 12 command questions, worth 74 points. Check each answer in place without moving to the next question; commands outside the accepted answer list await manual review. Answers and optional timer state are saved locally in the browser. The interface supports light and dark themes.
 
 ## Run
 
